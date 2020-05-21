@@ -1,0 +1,2039 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Apr 20 12:48:17 2020
+
+@author: khash
+"""
+import time
+import numpy as np
+import tkinter as tk
+#from tkinter import tk
+import tkinter.messagebox
+from tkinter import messagebox
+from PIL import Image, ImageTk
+
+
+
+
+#==============================================================================
+
+
+class Standards():
+    def __init__(self):        
+        self.suits = ['S', 'D', 'C', 'H']
+        self.card_nums = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
+
+def make_standard_deck():
+    standard_deck = []
+    for suit in Standards().suits:
+        for card_num in Standards().card_nums:
+            standard_deck.append(Card(suit, card_num))
+            #Standard.append(number+suit)
+    return np.array(standard_deck)
+        # Optionsdictplayer = {0:'Fold', 1:'Check', 2:'Allin', 3:'Call', 4:'Raise'}  
+        #Optionsdictplayer = {'Fold':0, 'Check':1, 'Allin':2, 'Call':3, 'Raise':4}  
+###############################################################################
+
+
+
+
+class Card():
+    def __init__(self, suit = 'S', card_num = 'A', joker = False):
+        self.suit = suit
+        self.card_num = card_num # an str
+        self.number = Standards().card_nums.index(self.card_num)+1 # an int
+        if self.number == 1: # Ace
+            self.number = 14
+        self.val = self.card_num + self.suit
+
+        
+    
+# an array of cards
+class Deck52():
+    def __init__(self, cards = None):
+        if cards == None:
+            cards = make_standard_deck()
+        self.cards = cards
+    
+    # only throws away the top card. to put the top card on the bottom, uncomment.
+    def Burn(self):
+        #top = self.cards[-1]
+        self.cards = np.delete(self.cards, -1)
+        #self.cards = [top] + self.cards
+    
+    def Shuffle(self):
+        np.random.shuffle(self.cards)
+        
+    # returns the top card
+    def Draw(self):
+        top = self.cards[len(self.cards)-1]
+        self.cards = np.delete(self.cards, -1)
+        return top
+        
+
+
+    
+###############################################################################
+
+# set of cards, current bet, money left
+class Player:
+    def __init__(self, name, money, seat_number, table, player_window, cards = np.array([])):
+        
+        
+        self.name = name
+        self.money = money
+        self.cards = cards
+        self.participation = "active" 
+        # someone else should manage this shit
+        self.seat_number = seat_number
+        
+        self.table = table
+        self.player_window = player_window
+        
+    
+    def GetCard(self, card):
+        self.cards = np.append(self.cards, card)
+
+
+    def RaiseBounds(self):
+        lower_bound = 1
+        upper_bound = self.money + self.table.current_bets[self] - self.table.check_amount
+        return [lower_bound, upper_bound]
+        
+    def Raise(self, raise_amount):
+        money_amount = raise_amount + self.table.check_amount - self.table.current_bets[self]
+        self.PutMoney(money_amount)
+
+
+    def CallOrCheck(self):
+        money_amount = self.table.check_amount - self.table.current_bets[self]
+        self.PutMoney(money_amount)
+        
+
+    def AllIn(self):   
+        if self.participation != "all in":
+            self.participation = "all in"
+            self.PutMoney(self.money)
+            self.player_window.parent.MakeAnnouncement(self.MakeText("all in"), self.seat_number)
+        
+        
+    def Fold(self):     
+        self.participation = "fold"
+        self.player_window.parent.MakeAnnouncement(self.MakeText("fold"), self.seat_number)        
+
+    
+    def PutMoney(self, money_amount):
+        if money_amount > self.money:
+            self.Fold()
+            return False
+        else:
+            self.money -= money_amount
+            self.table.TakeMoney(self, money_amount)
+            self.player_window.parent.MakeAnnouncement(self.MakeText("put money", money_amount),\
+                                                       self.seat_number)            
+            
+            if self.money == 0: # and self.participation != "all in":
+                self.AllIn()
+            return True
+        #elif money_amount == self.money:
+            #self.AllIn()
+        #else:
+            #self.player_window.parent.MakeAnnouncement(self.MakeText("put money", money_amount),\
+                                                       #self.seat_number)
+        #self.money -= money_amount
+        #self.table.TakeMoney(self, money_amount)
+        ##self.table.current_bets[self] += money_amount
+        #return True
+
+
+    def MakeText(self, text, money_amount = None):
+        if text == "all in":
+            return "The player "+self.name+" is now all in."
+            #return "The player "+self.name+" has put "+str(money_amount)+" dollars,"+\
+                    #" and is now all in."
+        elif text == "fold":
+            return "The player "+self.name+" has folded."
+        elif text == "put money":
+            return "The player "+self.name+" has put "+str(money_amount)+" dollars."
+        else:
+            return text
+            
+            
+class Table(): # np.array of players
+    def __init__(self, all_players_windows, players, game_options, deck = None):
+        self.all_players_windows = all_players_windows
+        
+        self.seats = players
+        if players == None:
+            self.seats = np.array([])
+        
+        self.bets = {}
+        for player in self.seats:
+            if player == None or player.player_window.state.quit.val: # write the if function
+                self.bets[player] = None
+            else:
+                self.bets[player] = 0                
+        self.current_bets = self.bets.copy()
+        
+        self.total_seats = game_options.total_seats.initial_value
+        self.small_blind = game_options.small_blind.initial_value
+
+        
+        self.cards = np.array([])
+        
+        self.check_amount = 0
+        
+        self.game_number = 0
+        
+        if deck:
+            self.deck = deck
+        else:
+            self.deck = Deck52()
+    
+    
+    def GetCard(self, card):
+        self.cards = np.append(self.cards, card)
+        
+    
+    def ActiveNumber(self):
+        counter = 0
+        if len(self.players) > 0:
+            for player in self.players:
+                if player != None and player.participation in ["active", "all in"]:
+                    counter += 1
+        return counter
+    
+    
+    def TakeMoney(self, player, money_amount):
+        self.current_bets[player] += money_amount
+        if self.check_amount < self.current_bets[player]:
+            self.check_amount = self.current_bets[player]
+        
+    
+    def UpdateBets(self):
+        self.check_amount = 0
+        for player in self.seats:
+            if player == None:
+                continue
+            self.bets[player] += self.current_bets[player]
+            self.current_bets[player] = 0
+    
+        
+    def AddPlayer(self, player):
+        #if self.seats != None:
+        if (len(self.seats) >= self.total_seats):
+            #print("fix this, adding too many players")
+            return
+        
+        initial_amount = None
+        if player != None: # write the if function
+            initial_amount = 0   
+        self.bets[player] = initial_amount
+        self.current_bets[player] = initial_amount
+
+        self.seats = np.append(self.seats, player)
+        
+        
+    def Deleteplayer(self, player_name): 
+        found = False
+        for i in range(len(self.seats)):
+            if self.seats[i] != None and self.seats[i].name == player_name: # write the if function
+                found = True
+                break
+        if found:
+            self.seats = np.delete(self.seats, i)
+        else:
+            print("fix this")
+
+            
+###############################################################################
+  
+###############################################################################
+class ColorOptions():
+    def __init__(self):
+        self.warning_color          = "red"
+        self.caution_color          = "orange"
+        self.assumption_color       = "green"
+        self.announcement_color     = "blue"
+        self.delete_button_color    = "purple"
+        
+###############################################################################        
+
+def display_card(master, card, current_row, current_column, image_width, padx = 0):
+
+    pic = card + ".png"
+    image_height = int(1.57*image_width)
+    address = str(r"C:\Users\khash\Desktop\Python\Poker\Playing Cards\\")+pic
+    
+    temp_photo = Image.open(address)
+    temp_photo = temp_photo.resize((image_width, image_height), Image.ANTIALIAS)
+    temp_photo.save(pic, "png") 
+
+    img = tk.PhotoImage(file = pic)
+    label = tk.Label(master, image=img)
+    label.img = img # to keep the reference for the image.
+    label.grid(row = 0, column = current_column, padx = padx)#sticky = tk.E+tk.N) 
+
+
+###############################################################################
+
+def allowed_interval(entry_text, lower_bound = 0, upper_bound = float("inf")):
+    if entry_text == "":
+        return      {"case":0   , "text":"Please enter a number." , "color":ColorOptions().warning_color}
+    for char in entry_text:
+        if ord(char) not in range(ord('0'), ord('9')+1):
+            return  {"case":0   , "text":"Please enter a number." , "color":ColorOptions().warning_color}
+    number = int(entry_text)
+    if number not in range(lower_bound, upper_bound):
+        text = "Entry must be between "+ str(lower_bound) +" and "+ str(upper_bound-1) +"."
+        return      {"case":-1  , "text":text                     , "color":ColorOptions().caution_color}
+    return          {"case": 1  , "text":"The value changed."     , "color":ColorOptions().assumption_color}
+
+
+# attribute here is an instance of the class OptionValueProperties
+def InitializeEntry(master, attribute, current_row, current_column = 0, some_text = ""):
+    def entry_casework():
+        entry_text = attribute.entry.get()[ :attribute.max_entry_length]
+        response = allowed_interval(entry_text, attribute.lower_bound, attribute.upper_bound)
+        attribute.announcement_fg_color         = response["color"]
+        attribute.announcement_text             = response["text"]
+        if response["case"] > 0:    
+            attribute.initial_value             = int(entry_text)
+            attribute.assumption_text           = "The current value is " + str(attribute.initial_value)
+            
+        attribute.label_announcement["fg"]      = attribute.announcement_fg_color
+        attribute.label_announcement["text"]    = attribute.announcement_text
+            
+        attribute.label_assumption["text"]      = attribute.assumption_text
+             
+            
+    tk.Label(master, text = some_text).grid(row = current_row, column = current_column, sticky = tk.E)
+    attribute.entry = tk.Entry(master)
+    attribute.entry.grid(row = current_row, column = 1+current_column)
+    tk.Button(master, text = "Press to Submit", command = entry_casework)\
+            .grid(row = current_row, column = 2+current_column)
+        
+    attribute.label_announcement.grid(row = current_row, column = 3+current_column, sticky = tk.W)
+    attribute.label_assumption.grid(row = current_row+1, column = 1+current_column,\
+                                    columnspan = 2, sticky = tk.W)
+    
+    
+# attribute here is an instance of the class OptionCheckProperties    
+def InitializeCheck(master, attribute, current_row, current_column = 0, some_text = ""):
+    def check_casework():
+        if attribute.initial_value.get(): 
+            attribute.assumption_text       = attribute.true_text
+            attribute.assumption_fg_color   = attribute.true_fg_color
+        else:
+            attribute.assumption_text       = attribute.false_text
+            attribute.assumption_fg_color   = attribute.false_fg_color
+
+        attribute.label_assumption["text"]  = attribute.assumption_text
+        attribute.label_assumption["fg"]    = attribute.assumption_fg_color
+
+        
+    attribute.initial_value = tk.BooleanVar()
+    c = tk.Checkbutton(master, text = some_text, variable = attribute.initial_value,\
+                           onvalue = True, offvalue = False, command = check_casework)
+    c.grid(row = current_row, column = current_column, columnspan = 3)
+        
+    attribute.label_assumption.grid(row = current_row+1, column = 1+current_column,\
+                                    columnspan = 2, sticky = tk.W)
+
+
+# attribute is an instance of class PlayerNameProperties, player_names is an array of strings.
+def InitializeName(master, attribute, players_names, current_row, current_column = 0, some_text = ""):
+    def name_casework():
+        name = entry.get()[ :attribute.max_entry_length]
+        if empty_name(name):
+            attribute.announcement_text         = attribute.empty_text
+            attribute.announcement_fg_color     = attribute.empty_fg_color
+        elif name in players_names:
+            attribute.announcement_text         = attribute.repetitive_text
+            attribute.announcement_fg_color     = attribute.repetitive_fg_color
+        else:
+            attribute.name = name
+            attribute.announcement_text         = "The name you entered is " + str(name)
+            attribute.announcement_fg_color     = ColorOptions().assumption_color
+            
+        attribute.label_announcement["text"]    = attribute.announcement_text
+        attribute.label_announcement["fg"]      = attribute.announcement_fg_color
+        
+    tk.Label(master, text = some_text).grid(row = current_row, column = current_column, sticky = tk.E)
+    entry = tk.Entry(master)
+    entry.grid(row = current_row, column = 1+current_column)
+    tk.Button(master, text = "Press to Submit", command = name_casework)\
+            .grid(row = current_row, column = 2+current_column)
+        
+    attribute.label_announcement.grid(row = current_row+1, column = 1+current_column, sticky = tk.W)
+    
+
+
+def empty_name(name, bad_chars = [" "]):
+    if name == None or name == "":
+        return True
+    for char in name:
+        if char not in bad_chars:
+            return False
+    return True
+
+# attribute must be an instance of class OptionRadioButtonProperties
+def InitializeRadioButton(master, attribute, current_row, current_column = 0, some_text = ""):
+    attribute.current_value = tk.StringVar()
+    attribute.current_value.set(attribute.initial_value)
+    
+    tk.Label(master, text = some_text).grid(row = current_row, column = current_column)
+    current_column += 1
+    
+    def change_attribute():
+        attribute.initial_value = attribute.current_value.get()
+    
+    for option in attribute.options_dict:
+        if current_column >= attribute.max_column:
+            current_column = attribute.min_column
+            current_row += 1
+        if len(attribute.options_dict[option]) == 2:       
+            (val, fg_color) = attribute.options_dict[option]
+        else:
+            val = attribute.options_dict[option]
+
+        tk.Radiobutton(master, text = option, variable = attribute.current_value,\
+                       value = val, fg = fg_color, command = change_attribute)\
+                       .grid(row = current_row, column = current_column, sticky = tk.W)
+            
+        current_column +=1
+    
+    
+    
+#------------------------------------------------------------------------------
+
+class PlayerNameProperties():
+    def __init__(self, master, name = "", max_entry_length = 20):
+        self.master = master
+        self.name = name
+        self.empty_name = empty_name(self.name)
+        self.max_entry_length = max_entry_length
+                    
+        self.empty_text = "Please enter name of a player here."
+        self.empty_fg_color = ColorOptions().caution_color
+        
+        self.repetitive_text = "The name "+ str(self.name) + " has already been used."
+        self.repetitive_fg_color = ColorOptions().warning_color
+        
+        self.announcement_fg_color = ColorOptions().assumption_color
+        self.announcement_text = ""
+        self.label_announcement = tk.Label(master, text = self.announcement_text,\
+                                           fg = self.announcement_fg_color)
+        
+        #self.name_validity = False
+
+
+class OptionRadioButtonProperties():
+    def __init__(self, master, initial_value, options_dict):
+        self.master = master
+        self.initial_value = initial_value
+        self.current_value = initial_value
+        self.options_dict = options_dict
+        
+        
+        self.min_column = 1
+        self.max_column = 4
+
+
+        
+class OptionCheckProperties():
+    def __init__(self, master, initial_value, true_text, false_text):
+        self.master = master
+        self.initial_value = initial_value
+        
+        self.true_text = true_text
+        self.true_fg_color = ColorOptions().assumption_color
+        self.true_assumption = tk.Label(self.master, text = self.true_text,\
+                                        fg = self.true_fg_color)
+        
+        self.false_text = false_text
+        self.false_fg_color = ColorOptions().assumption_color
+        self.false_assumption = tk.Label(self.master, text = self.false_text,\
+                                         fg = self.false_fg_color)
+        
+        if self.initial_value:
+            self.assumption_text = self.true_text
+            self.assumption_fg_color = self.true_fg_color
+            self.label_assumption = self.true_assumption
+        else:
+            self.assumption_text = self.false_text
+            self.assumption_fg_color = self.false_fg_color
+            self.label_assumption = self.false_assumption
+        
+
+
+class OptionValueProperties():
+    def __init__(self, master, initial_value, lower_bound, upper_bound, max_entry_length = 20):
+        self.master = master
+        
+        self.initial_value = initial_value
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+        
+        
+        self.entry = None
+        self.max_entry_length = max_entry_length
+        
+        self.announcement_fg_color = ColorOptions().assumption_color
+        self.announcement_text = " "
+        self.label_announcement = tk.Label(self.master, text = self.announcement_text,\
+                                           fg = self.announcement_fg_color)
+        
+        self.assumption_fg_color = ColorOptions().assumption_color
+        self.assumption_text = "The current value is " + str(self.initial_value)
+        self.label_assumption = tk.Label(self.master, text = self.assumption_text,\
+                                         fg = self.assumption_fg_color)
+    
+    #def AnnouncementLabel(self):
+        #return tk.Label(self.master, text = self.announcement_text, fg = self.announcement_fg_color)
+        
+    #def AssumptionLabel(self):
+        #return tk.Label(self.master, text = self.assumption_text, fg = self.assumption_fg_color)
+    
+    
+    #def UpdateColorText(self, color, text, announcement = True):
+        #if announcement:
+            #self.announcement_fg_color = color
+            #self.announcement_text = text
+            #self.AnnouncementLabel()
+        #else:
+            #self.assumption_fg_color = color
+            #self.assumption_text = text
+            #self.AssumptionLabel()
+#------------------------------------------------------------------------------            
+
+class GameOptions(): #ADD WAITING TIME
+    def __init__(self, master):
+        self.master = master
+        
+        self.small_and_big_blinds = [1, 2] # have not figured out what to change about this.
+
+        self.total_seats    = OptionValueProperties(self.master,  12,  2, 23     )
+        self.small_blind    = OptionValueProperties(self.master,   1,  1, 1000000)
+        self.num_bet_rounds = OptionValueProperties(self.master, 100,  0, 1000   )
+        self.waiting_time   = OptionValueProperties(self.master, 300, 30, 3600   )
+        self.pausing_time   = OptionValueProperties(self.master,  10,  0, 50     )
+        self.image_width    = OptionValueProperties(self.master, 100, 20, 201    )
+        
+        true_text = "Same amount of money for everyone!"
+        false_text = "Different amounts of money." 
+        self.same_amount = OptionCheckProperties(self.master, False, true_text, false_text)
+        
+        options_dict = {"red"   :("red_back"   , "red"   ), "blue" :("blue_back"    , "blue"    ),\
+                        "yellow":("yellow_back", "yellow"), "green":("green_back"   , "green"   ),\
+                        "purple":("purple_back", "purple"), "gray" :("gray_back"    , "gray"    )} 
+        self.card_back_color = OptionRadioButtonProperties(self.master, "red_back", options_dict) 
+        
+        self.dict = {self.total_seats       : self.InitializeTotalSeats,    \
+                     self.small_blind       : self.InitializeSmallBlind,    \
+                     self.waiting_time      : self.InitializeWaitingTime,   \
+                     self.num_bet_rounds    : self.InitializeNumBetRounds,  \
+                     self.pausing_time      : self.InitializePausingTime,   \
+                     self.image_width       : self.InitializeImageWidth,    \
+                     self.same_amount       : self.InitializeSameAmount,    \
+                     self.card_back_color   : self.InitializeCardColor}
+        
+        self.late_fg_color              = ColorOptions().warning_color
+        self.my_announcement_fg_color   = ColorOptions().announcement_color
+        self.card_announcement_fg_color = ColorOptions().assumption_color # not used yet.
+        self.scrolling_box_width    = 40
+        self.scrolling_box_height   = 10
+        self.late_time = 30
+        
+
+    def InitializeTotalSeats(self, current_row):
+        some_text = "The Number of Seats"
+        InitializeEntry(self.master, self.total_seats,      current_row, 0, some_text)
+                
+    def InitializeSmallBlind(self, current_row):
+        some_text = "The Amount of Small Blind"
+        InitializeEntry(self.master, self.small_blind,      current_row, 0, some_text)
+
+    def InitializeNumBetRounds(self, current_row):
+        some_text = "Maximum Number of Betting Rounds"
+        InitializeEntry(self.master, self.num_bet_rounds,   current_row, 0, some_text)
+                     
+    def InitializeWaitingTime(self, current_row):
+        some_text = "The Amount of Time to Wait for Players (in seconds)"
+        InitializeEntry(self.master, self.waiting_time,     current_row, 0, some_text)
+        
+    def InitializePausingTime(self, current_row):
+        some_text = "The Amount of Time to pause between moves (in 1/10 seconds)"
+        InitializeEntry(self.master, self.pausing_time,     current_row, 0, some_text)        
+    
+    def InitializeImageWidth(self, current_row):
+        some_text = "The Width of a Card Image (in pixels)"
+        InitializeEntry(self.master, self.image_width,      current_row, 0, some_text)
+
+    def InitializeSameAmount(self, current_row): 
+        some_text = "Check if every player starts with the same amount of money"
+        InitializeCheck(self.master, self.same_amount,      current_row, 0, some_text)
+        
+    def InitializeCardColor(self, current_row):
+        some_text = "Choose The Color in Back of Cards"
+        InitializeRadioButton(self.master, self.card_back_color, current_row, 0, some_text)
+    
+#------------------------------------------------------------------------------
+
+class GameGraphics():
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Main Window")       
+        self.frames = GameGraphicsFrames(self)
+              
+        self.game_options = GameOptions(self.frames.options_frame)
+        
+        self.max_money_amount = OptionValueProperties(self.frames.max_money_frame, 0, 0, 10**9)
+        
+        self.WelcomeLabel(self.frames.welcome_frame)
+        self.OptionsFrame(self.frames.options_frame)
+        
+        self.root.mainloop()
+        
+        
+    def WelcomeLabel(self, master, welcome_text = "Welcome to the Poker Tournament!",\
+                     fg_color = "red", bg_color = "blue"):
+        welcome_label = tk.Label(master, text = welcome_text, fg = fg_color, bg = bg_color)
+        welcome_label.config(font=("Courier", 35))
+        welcome_label.grid(row = 0, columnspan = 4)    
+
+
+    def OptionsFrame(self, master):        
+        current_row = 0
+        for term in self.game_options.dict:
+            self.game_options.term = self.game_options.dict[term](current_row)   
+            current_row += 2
+        
+        
+        def delete_current_frame():
+            self.game_options.same_amount.initial_value = self.game_options.same_amount.initial_value.get()
+
+            master.destroy()
+            self.InputMaxMoney(self.frames.max_money_frame)            
+
+        tk.Button(master, text = "Press to Continue to the Player Options.",\
+                  command = delete_current_frame, bg = ColorOptions().delete_button_color)\
+                  .grid(row = current_row, column = 1, columnspan = 2)
+        
+            
+    def InputMaxMoney(self, master):
+        current_row = 0
+        if self.game_options.same_amount.initial_value:
+            some_text = "Please enter the amount of money everyone will start with"
+        else:
+            some_text = "Please enter the maximum amount of money anyone is allowed to start with"
+        InitializeEntry(master, self.max_money_amount, current_row, 0, some_text)
+        current_row += 2
+            
+            
+        def delete_current_frame():
+            if self.max_money_amount.initial_value:
+                master.destroy()    
+                AllPlayersWindows(self.root, self.game_options, self.max_money_amount.initial_value)        
+            
+            else:
+                tk.messagebox.showerror(title="Can Not Continue", message="Please enter a number")
+                
+        tk.Button(master, text = "Press to Input the Players.",\
+                  command = delete_current_frame, bg = ColorOptions().delete_button_color)\
+                  .grid(row = current_row, column = 1, columnspan = 2)
+                  
+        
+#------------------------------------------------------------------------------
+
+class GameGraphicsFrames():
+    def __init__(self, game_graphics):
+        self.game_graphics = game_graphics
+        self.master = self.game_graphics.root
+
+        self.welcome_frame = tk.Frame(self.master) 
+        self.welcome_frame.grid(row = 0, column = 0, sticky = tk.N+tk.E+tk.W)
+        
+        self.options_frame = tk.Frame(self.master)
+        self.options_frame.grid(row = 1, column = 0, sticky = tk.E+tk.W, padx = 10)
+        
+        self.max_money_frame = tk.Frame(self.master)
+        self.max_money_frame.grid(row = 2, column = 0, sticky = tk.E+tk.W, padx = 10)
+    
+
+
+
+#------------------------------------------------------------------------------       
+class AllPlayersWindowsSteps():
+    def __init__(self, all_players_windows):
+        self.all_players_windows = all_players_windows
+        
+        self.start_the_round = False
+        self.restart_button_shown = False
+        self.playing = False
+        
+        
+        
+
+class AllPlayersWindowsArrays():
+    def __init__(self, all_players_windows_array):
+        self.all_players_windows_array = all_players_windows_array
+        
+        length = self.all_players_windows_array.game_options.total_seats.initial_value
+        self.money = [None] * length
+        self.names = [""]   * length
+        self.roots = []
+        self.windows = []
+        
+        
+class AllPlayersWindows():
+    def __init__(self, master, game_options, max_money_amount):
+        self.master = master
+        self.table = None
+        self.algorithm = None
+        
+        self.game_options = game_options 
+        self.max_money_amount = max_money_amount
+        # keeps information of all players in arrays.
+        self.all_players = AllPlayersWindowsArrays(self) 
+        self.first_player = 0
+        self.num_of_active_players = 0 # do I need to save it in here? maybe the function is enough.
+        
+        self.OpenWindows()
+        #self.CloseWindows()
+        
+        self.steps = AllPlayersWindowsSteps(self)
+        
+        self.master.protocol("WM_DELETE_WINDOW", self.Closing)
+        
+    def Closing(self):
+        for player_window in self.all_players.windows:
+            player_window.Closing()
+        #for root in self.all_players.roots:
+            #root.destroy()
+        self.master.destroy()
+        
+        
+    def OpenWindows(self):
+        for i in range(self.game_options.total_seats.initial_value):
+            #new_root = tk.Tk()
+            new_root = tk.Toplevel()
+            title_text = "player number "+str(i+1)
+            new_root.title(title_text)
+            self.all_players.roots.append(new_root)
+            new_window = PlayerWindow(new_root, i, self)
+            self.all_players.windows.append(new_window)
+            
+        
+    def CloseWindows(self):
+        for root in self.all_players.roots:
+            if root.state() == "normal":
+                root.mainloop()
+        self.all_players.roots = []    
+        
+        
+    def NotEnoughPlayers(self):
+        if not self.steps.restart_button_shown:
+            tk.Label(self.master, text = "Enough Players did not join").grid(sticky = tk.S)
+            tk.Button(self.master, text = "Press to Restart(This doesn't do anything yet)")\
+            .grid(sticky = tk.S) # add some command!
+            self.steps.restart_button_shown = True
+            
+            for player_window in self.all_players.windows:
+                if player_window.state.waiting_for_others.val:
+                    player_window.frames.waiting_frame.destroy()
+                    some_text = "Unfortunately, there are not enough players to start this round."
+                    tk.Label(player_window.master, text = some_text, fg = "red").grid()
+        
+
+    def CreatPlayers(self):
+        #players = [None] * self.game_options.total_seats.initial_value
+        
+        for i in range(self.game_options.total_seats.initial_value):
+            #if empty_name(self.all_players.names[i]):
+            if self.all_players.windows[i].state.quit.val:
+                new_player = None
+            else:
+                name = self.all_players.names[i]
+                money_amount = self.all_players.money[i].initial_value
+                new_player = Player(name, money_amount, i, self.table, self.all_players.windows[i])
+                
+                
+            self.table.AddPlayer(new_player) 
+            self.all_players.windows[i].player = new_player
+            
+        #self.table.seats = np.array(players)
+        #return np.array(players)
+            
+        
+    def StartTheRound(self):
+        if not self.steps.start_the_round:
+            self.steps.start_the_round = True   
+            self.table = Table(self, None, self.game_options)
+            self.CreatPlayers()
+            self.table.deck.Shuffle()
+            
+            for i in range(len(self.all_players.windows)):
+                player_window = self.all_players.windows[i]
+                if player_window.state.waiting_for_others.val:
+                    player_window.StartTheRound()
+                    
+            self.GiveCardToPlayers()
+            self.GiveCardToPlayers()
+            
+            self.algorithm = PlayingTheGameAlgorithm(self)#should it have self.algorithm?
+                                  
+            
+    def GiveCardToPlayers(self):
+        for player_window in self.all_players.windows:
+            if player_window.state.playing_poker.val: # or not state.quit.val?
+                card = self.table.deck.Draw()
+                player_window.DisplayOwnCard(card)
+                
+                    
+    def DealCardOnTable(self, card = None, padx = 0):
+        if card == None: # maybe delete this line and the next?
+            card = self.table.deck.Draw()
+        for player_window in self.all_players.windows:
+            if player_window.state.playing_poker.val:  # or not state.quit.val?
+                player_window.DisplayTableCard(card.val, padx)
+                
+        
+    def MakeAnnouncement(self, text, seat_number): # is seat number needed??
+        for i in range(len(self.all_players.windows)):
+            current_player = self.all_players.windows[i]
+            if current_player.state.quit.val:
+                continue
+            
+            fg_color = None
+            if seat_number == i:
+                fg_color = self.game_options.my_announcement_fg_color
+            elif seat_number == None:
+                fg_color = self.game_options.card_announcement_fg_color
+                
+            current_player.DisplayAnnouncement(text, fg_color) 
+            current_player.DisplayInformationTable() # should I do it here or use the function below?
+            
+            
+    def UpdateInformationTable(self):# do I need a function, or is theMakeAnnouncement enough?
+        for i in range(len(self.all_players.windows)):
+            current_player = self.all_players.windows[i]
+            if current_player.state.quit.val:
+                continue
+            current_player.DisplayInformationTable()
+            
+    # this function is not used, and is probably Muda muda muda muda
+    def NumberOfActivePlayers(self):
+        answer = 0
+        for player_window in self.all_players.windows:
+            if player_window.state.quit.val:# is there any other case I should consider?
+                continue
+            
+            if player_window.state.playing_poker:
+                self.steps.playing = True
+            if self.steps.playing:
+                if player_window.player.participation != "fold":
+                    answer += 1
+            else:
+                answer += 1
+        return answer
+            
+            
+#------------------------------------------------------------------------------
+
+class PlayerWindow():
+    def __init__(self, master, seat_number, all_players_windows_class): 
+        self.parent = all_players_windows_class
+        
+        self.master     = master        
+        
+        self.frames     = PlayerFrames(self)
+        self.state      = PlayerWindowState(self)
+        self.steps      = PlayerWindowSteps(self)
+        
+        self.name_class = PlayerNameProperties(self.frames.name_frame)
+        self.player = None
+        self.seat_number = seat_number
+        self.announcement_frame_opened = False
+        
+        self.money_amount = OptionValueProperties(self.frames.name_frame,\
+                                                  0, 0, self.parent.max_money_amount+1)
+        #self.late_time = 30
+
+        self.InputName(self.frames.name_frame)
+        
+        self.master.protocol("WM_DELETE_WINDOW", self.Closing)
+        
+             
+    def Closing(self):
+        self.state.Quit()
+        self.steps.closing_started = True
+        if self.steps.game_started:
+            self.ClosingWhilePlaying() # add some function for this.
+        else:
+            self.EnoughPlayersJoined()
+        
+        self.master.destroy()        
+        
+        
+    def ClosingWhilePlaying(self):
+        self.player.Fold()
+         # can I connect this to the similar function from PlayingTheGame?
+        #if self.parent.NumberOfActivePlayers() < 2:
+        if self.parent.algorithm != None and not self.parent.algorithm.EnoughPlayersLeft():
+            print("winner should be announced.")
+            pass # announce winner, but how? this should be done via the class PlayingTheGame.
+        
+        
+    def InputName(self, master):  
+        current_row = 0
+        some_text = "Player "+str(self.seat_number+1)+"'s name:"
+        InitializeName(master, self.name_class, self.parent.all_players.names, current_row, 0, some_text)
+        
+        if self.parent.game_options.same_amount.initial_value: #self.same_amount:
+            self.money_amount.initial_value = self.parent.max_money_amount  
+            self.parent.all_players.money[self.seat_number] = self.money_amount
+        else: 
+            some_text = "Amount of Money:"
+            InitializeEntry(master, self.money_amount, current_row, 3, some_text)
+            self.parent.all_players.money[self.seat_number] = self.money_amount
+        current_row += 2
+        
+        tk.Label(master, text = "Time Remaining:").grid(row = current_row, column = 0)
+        ShowTimer(master, self, current_row, 1, self.parent.game_options.waiting_time.initial_value,\
+              self.parent.game_options.late_time, None, self.parent.game_options.late_fg_color)
+        current_row += 1
+        
+        def delete_current_frame():
+            if not self.CheckForNameError():
+                self.parent.all_players.names[self.seat_number] = self.name_class.name
+                master.destroy()    
+                self.state.Next()
+                
+                self.EnoughPlayersJoined()
+                
+        tk.Button(master, text = "Press to Start the Game", command = delete_current_frame,\
+                  bg = ColorOptions().delete_button_color).grid(row = current_row, column = 1)
+
+
+    def CheckForNameError(self):
+        error_found = False
+        error_title = "Can Not Continue."
+        if self.money_amount.initial_value <= 0:
+            tk.messagebox.showerror(title = error_title, message = "Please enter a number.")
+            error_found = True
+        if empty_name(self.name_class.name):
+            tk.messagebox.showerror(title = error_title, message = "Please enter a name.")
+            error_found = True
+        if self.name_class.name in self.parent.all_players.names: 
+            some_text = "The name "+ str(self.name_class.name) +\
+                        " has already been used. Please enter a different name."
+            tk.messagebox.showerror(title = error_title, message = some_text)
+            error_found = True            
+        
+        return error_found            
+
+
+    def EnoughPlayersJoined(self):
+        ready_for_game = True
+        num_of_ready_players = 0
+        for player_window in self.parent.all_players.windows:
+            if not (player_window.state.quit.val or player_window.state.waiting_for_others.val):
+                ready_for_game = False
+                break
+            if player_window.state.waiting_for_others.val:
+                num_of_ready_players += 1
+        if self.state.waiting_for_others.val and not self.steps.waiting_statement_written:
+            some_text = str(self.name_class.name) + ", please wait for other players to join..."
+            tk.Label(self.frames.waiting_frame, text = some_text).grid()
+            self.steps.waiting_statement_written = True
+        if ready_for_game:
+            if num_of_ready_players >= 2:
+                self.parent.StartTheRound()
+            else:
+                self.parent.NotEnoughPlayers()
+                if not self.steps.closing_started:
+                    self.Closing()
+  
+            
+    def StartTheRound(self): 
+        if self.state.waiting_for_others.val:
+            self.frames.waiting_frame.destroy()
+            self.state.Next()
+            self.steps.game_started = True
+            
+            #self.player = self.parent.table.seats[self.seat_number]
+            self.OpenAnnouncementScrollingBox()
+            self.DisplayInformationTable()
+                
+            back_color = self.parent.game_options.card_back_color.initial_value
+            padx = 10
+            self.DisplayTableCard(back_color, padx)
+
+
+    def OpenAnnouncementScrollingBox(self):
+        if not self.announcement_frame_opened:
+            self.frames.during_game_frame.OpenAnnouncementScrollingBox()
+            self.announcement_frame_opened = True
+    
+    def DisplayAnnouncement(self, text, fg_color = None): #my_announcement = False, 
+        if not self.announcement_frame_opened:
+            return
+        
+        #if my_announcement:
+            #fg_color = self.parent.game_options.my_announcement_fg_color
+        self.frames.during_game_frame.announcement_scrolling_box.Insert(text, fg_color)
+        #tk.Label(self.frames.during_game_frame.announcement_frame, text = text).grid()
+        
+    
+    def DisplayInformationTable(self):
+        InformationTable(self.frames.during_game_frame.information_table_frame,\
+                         self.parent.table, self.player)        
+        
+    def DisplayTableCard(self, card_val, padx):
+        current_column = len(self.parent.table.cards)
+        display_card(self.frames.during_game_frame.table_frame, card_val,\
+                     0, current_column, self.parent.game_options.image_width.initial_value, padx)
+        
+        
+    def DisplayOwnCard(self, card):
+        current_column = len(self.player.cards)
+        self.player.GetCard(card)
+        display_card(self.frames.during_game_frame.player_cards_frame, card.val,\
+                     0, current_column, self.parent.game_options.image_width.initial_value)
+
+
+###############################################################################
+
+class PlayerFrames():
+    def __init__(self, player_window):
+        self.player_window = player_window
+        #self.master = self.parent.master
+        
+        self.name_frame = tk.Frame(self.player_window.master)
+        self.name_frame.grid(sticky = tk.N)
+        
+        self.waiting_frame = tk.Frame(self.player_window.master)
+        self.waiting_frame.grid(sticky = tk.N)
+        
+        self.game_frame = tk.Frame(self.player_window.master)
+        self.game_frame.grid(sticky = tk.N)
+        self.during_game_frame = PlayerFramesDuringGame(self.player_window, self.game_frame)
+        
+        
+class PlayerFramesDuringGame():
+    def __init__(self, player_window, master):
+        self.player_window = player_window
+        self.master = master
+        
+        self.information_table_frame = tk.Frame(self.master)
+        self.information_table_frame.grid(row = 0, column = 0, sticky = tk.W+tk.N)
+        
+        self.table_frame = tk.Frame(self.master)
+        self.table_frame.grid(row = 0, column = 1, sticky = tk.E+tk.N)
+        
+        self.player_cards_frame = tk.Frame(self.master)
+        self.player_cards_frame.grid(row = 1, column = 1, sticky = tk.W+tk.N)  
+        
+        self.announcement_frame = tk.Frame(self.master)
+        self.announcement_frame.grid(row = 1, column = 0, sticky = tk.E+tk.N)
+        self.announcement_scrolling_box = None
+        
+        
+    def OpenAnnouncementScrollingBox(self):
+        self.announcement_scrolling_box = ScrollingListBox(self.announcement_frame,\
+                                            self.player_window.parent.game_options.scrolling_box_width,\
+                                            self.player_window.parent.game_options.scrolling_box_height)
+        
+        
+class ScrollingListBox():        
+    def __init__(self, master, width = None, height = None):
+        self.master = master
+        self.width = width
+        self.height = height
+        
+        scrollbar = tk.Scrollbar(self.master)
+        scrollbar.grid(row = 0, column = 1, sticky = tk.E+tk.N+tk.S)
+
+        self.mylist = tk.Listbox(self.master, width = self.width, height = self.height,\
+                                 yscrollcommand = scrollbar.set)
+        self.mylist.grid(row = 0, column = 0, columnspan = 1, sticky = tk.W+tk.S+tk.N)
+        scrollbar.config(command = self.mylist.yview )
+
+    def Insert(self, text, fg_color = None):
+        self.mylist.insert(0, text)
+        self.mylist.itemconfig(0, {"fg":fg_color})
+
+    
+        
+class PlayerWindowSteps():
+    def __init__(self, player_window):
+        self.player_window = player_window
+        
+        self.waiting_statement_written  = False
+        #self.restart_button_shown       = False
+        self.closing_started            = False
+        self.game_started               = False
+
+###############################################################################
+        
+class InformationTable():
+    def __init__(self, master, table, cur_player):
+        self.master = master
+        self.table = table
+        self.cur_player = cur_player
+        
+        #self.padx = 10
+        
+        self.color_fg = None
+        self.color_bg = None
+                
+        
+        for i in range(len(self.table.seats)+1):
+            if i == 0:
+                player = None
+            else:
+                player = self.table.seats[i-1]
+            [self.color_fg, self.color_bg] = self.Color(player)
+            
+            if i > 0 and player == None:
+                tk.Label(master, text = None, fg = self.color_fg, bg = self.color_bg)\
+                .grid(row = i, columnspan = 5)
+                continue
+            
+            self.FillColumns(self.master, self.Columns(player), i, 0)
+    
+    def Columns(self, player = None):
+        if player == None:
+            return ["Name", "Participation", "Total Money Amount",\
+                    "Current Bet Amount", "Previous Bet Amount"]
+        else:
+            return [player.name, player.participation, str(player.money),\
+                    self.table.current_bets[player], self.table.bets[player]]
+        
+    def FillColumns(self, master, columns, current_row, current_column):
+        for term in columns:
+            tk.Label(master, text = term, fg = self.color_fg, bg = self.color_bg)\
+            .grid(row = current_row, column = current_column, sticky = tk.W+tk.E+tk.N+tk.S)
+            current_column += 1
+                  
+    # maybe add cases for small and big, or winner or ....
+    def Color(self, player):
+        fg = None
+        bg = None
+        if player == None:
+            return [fg, bg]
+        if type(player) != Player: # is this needed???
+            fg = "light gray"
+            return [fg, bg] 
+            
+        if player == self.cur_player:
+            if player.participation == "fold":
+                fg = "dark slate gray"
+            elif player.participation == "active":
+                bg = "green yellow"
+            elif player.participation == "all in":
+                bg = "gold"
+        else:
+            if player.participation == "fold":
+                fg = "light slate gray"
+            elif player.participation == "active":
+                bg = "green"
+            elif player.participation == "all in":
+                bg = "yellow"
+                    
+        return [fg, bg]
+
+#------------------------------------------------------------------------------
+
+class Node():
+    def __init__(self, val):
+        self.val = val
+        self.next = None
+        #self.prev = None
+
+class PlayerWindowState():
+    def __init__(self, player_window):
+        self.player_window = player_window
+
+        self.input_names        = Node(True)
+        self.waiting_for_others = Node(False)
+        self.playing_poker      = Node(False) #add a self.betting???
+        self.announce_winners   = Node(False)
+        self.input_new_round    = Node(False)
+        
+        self.quit = Node(False)
+        
+        self.input_names.next           = self.waiting_for_others
+        #self.waiting_for_others.prev = self.input_names
+        self.waiting_for_others.next    = self.playing_poker
+        #self.playing_poker.prev = self.waiting_for_others
+        self.playing_poker.next         = self.announce_winners
+        #self.announce_winners.prev = self.playing_poker
+        self.announce_winners.next      = self.input_new_round
+        
+
+    def Next(self):
+        node = self.input_names
+        while node.next != None and not node.val:
+            node = node.next
+        node.val = False
+        if node.next != None:
+            node.next.val = True
+        else:
+            self.quit = Node(True)
+        
+    def Quit(self):
+        node = self.input_names
+        while node.next != None:
+            node.val = False
+            node = node.next
+        self.quit = Node(True)
+        
+        
+    
+#------------------------------------------------------------------------------
+class Timer():
+    def __init__(self, total_time, started = False):
+        pass
+    
+
+
+# if attribute calls this function, it must have a function Closing
+class ShowTimer():
+    def __init__(self, master, attribute, row, column, total_time, late_time, start = None,\
+                 late_fg_color = None, fg_color = None, bg_color = None):
+        self.start = start
+        if start == None:
+            self.start = time.time()
+        self.total_time = total_time
+        self.late_time = late_time
+        ##
+        self.seconds_rem = self.total_time
+        
+        self.attribute = attribute
+        
+        self.row = row
+        self.column = column
+        self.fg_color = fg_color
+        self.late_fg_color = late_fg_color
+        self.bg_color = bg_color
+        
+        self.root = master
+        self.label = tk.Label(self.root, text = "", fg = self.fg_color, bg = self.bg_color)
+        self.label.grid(row = self.row, column = self.column)
+        self.UpdateClock()
+
+
+    def UpdateClock(self):
+        self.seconds_rem = self.total_time + self.start - time.time()
+        if self.seconds_rem <= self.late_time:
+            self.fg_color = self.late_fg_color
+        if self.seconds_rem <= 0:        
+            self.attribute.Closing()
+            #self.root.destroy()
+            return
+        time_rem = self.Convert(self.seconds_rem)
+        
+        self.label["text"] = time_rem
+        self.label["fg"] = self.fg_color
+        
+        self.root.after(1000, self.UpdateClock)
+
+
+    def Convert(self, seconds, hours = False):
+        s = int(seconds)%60
+        ss = str(s)
+        if s < 10:
+            ss = '0'+ss
+        if hours:
+            m = int(seconds/60)%60
+            mm = str(m)
+            if m < 10:
+                mm = '0'+mm
+            h = str(int(seconds/3600))
+            return h+':'+mm+':'+ss
+        else:
+            m = str(int(seconds/60))
+            return m+':'+ss
+
+
+###############################################################################        
+###############################################################################
+
+class AskTheQuestionHandler():
+    def __init__(self, player_window, options):
+        self.player_window = player_window
+        #self.not_raising = True
+
+        self.options = options
+        self.response_dict = {"fold"     : self.Fold,\
+                              "all in"   : self.AllIn,\
+                              "stay"     : self.Stay,\
+                              "check"    : self.CallOrCheck,\
+                              "call"     : self.CallOrCheck,\
+                              "raise"    : self.Raise,\
+                              "reveal"   : self.Reveal}
+
+        self.title = "Player "+str(self.player_window.seat_number+1)+"'s turn"
+        question = self.player_window.player.name +", what do you want to do?"
+        initial_response = "fold"
+        time = self.player_window.parent.game_options.waiting_time.initial_value
+        
+        self.question_window = PopTheQuestion(self.player_window, self.title,\
+                                              question, self.options, time, initial_response)
+        
+        self.HandleResponse()
+ 
+
+    def HandleResponse(self):                                    
+        if self.question_window.response in self.response_dict:
+            self.response_dict[self.question_window.response]()
+            
+    def Fold(self):
+        question = self.player_window.player.name+", are you sure you want to fold?"
+        if tk.messagebox.askyesno(self.title, question):
+            self.player_window.player.Fold()
+        else:
+            AskTheQuestionHandler(self.player_window, self.options)
+            #self.question_window 
+            #self.HandleResponse()
+
+    def AllIn(self, ask_again = True):
+        question = self.player_window.player.name+", are you sure you want to go all in?"
+        if tk.messagebox.askyesno(self.title, question):
+            self.player_window.player.AllIn()
+        elif ask_again:
+            AskTheQuestionHandler(self.player_window, self.options)
+            #self.question_window
+            #self.HandleResponse()
+    
+    def Stay(self):    
+        self.player_window.player.AllIn()
+        
+    def CallOrCheck(self):
+        self.player_window.player.CallOrCheck()
+
+    def Raise(self):
+        [lower_bound, upper_bound] = self.player_window.player.RaiseBounds()
+        master = tk.Toplevel()
+        master.title(self.title)
+        attribute = OptionValueProperties(master, 0, lower_bound, upper_bound)
+        text = "How much would you like to riase?"
+        InitializeEntry(master, attribute, 0, 0, text)
+        
+        def delete_current_frame():
+            if attribute.initial_value == upper_bound:
+                self.AllIn(False)
+            elif attribute.initial_value >= lower_bound and attribute.initial_value < upper_bound:
+                    
+                self.player_window.player.Raise(attribute.initial_value)
+                master.destroy()
+            else:
+                tk.messagebox.showerror(title="Can Not Continue", message="Please enter a number")
+        
+        tk.Button(master, text = "Press to submit", command = delete_current_frame,\
+                  bg = ColorOptions().delete_button_color).grid(row = 3, column = 1, columnspan = 2)
+        
+        master.wait_window()
+        #master.mainloop()
+        # bring a window that asks about the raise amount.
+        
+    def Reveal(self):
+        text = "The player "+self.player_window.player.name+" is going to reveal their cards."
+        self.player_window.parent.MakeAnnouncement(text, None)
+        
+        cards_str = ''
+        for card in self.player_window.player.cards:
+            cards_str += card.val + ' '
+        text = self.player_window.player.name+" has the cards "+cards_str
+        self.player_window.parent.MakeAnnouncement(text, self.player_window.player.seat_number)
+        
+#------------------------------------------------------------------------------ 
+       
+class PopTheQuestion():
+    def __init__(self, parent, title, question, options, time, initial_response = None):
+        self.master = tk.Toplevel()
+        self.master.protocol("WM_DELETE_WINDOW", self.Closing)
+        
+        self.parent = parent #not used
+        self.time = time #not used
+        
+        self.master.title(title)
+        self.question = question       
+        self.options = options
+        self.response = initial_response
+        #self.initial_response = initial_response
+        
+        self.CreateQuestion()
+        self.master.wait_window()
+    
+    def CreateQuestion(self):
+        current_row = 0
+        
+        question_frame = tk.Frame(self.master)
+        question_frame.grid(row = current_row)
+        tk.Label(question_frame, text = self.question).grid()
+        
+        current_row += 1
+        
+        buttons_frame = tk.Frame(self.master)
+        buttons_frame.grid(row = current_row)
+        current_row += 1
+        
+        current_column = 0
+        for option in self.options:
+            button = tk.Button(buttons_frame, text = option, command = lambda x=option:self.SetOption(x))
+            button.grid(row = 0, column = current_column)
+            current_column += 1 
+    
+    def SetOption(self, option_chosen):
+        self.response = option_chosen
+        #self.time = 
+        self.master.destroy()
+
+    
+    def Closing(self):
+        self.response = self.initial_response
+        self.master.destroy()
+
+###############################################################################
+            
+class PlayingTheGameAlgorithm():
+    def __init__(self, all_players_windows):
+        self.all_players_windows = all_players_windows
+        
+        self.ind                = self.all_players_windows.first_player
+        self.prev_last_raised   = self.all_players_windows.first_player
+        
+        self.no_new_raise   = True
+        self.last_round     = False
+        self.first_move      = False
+        self.enough_players_left = True # is this needed?
+        
+        self.PreFlop()
+              
+    #------------------- GAME STEPS -------------------------------------------
+    def PreFlop(self):
+        self.SmallAndBigBlinds()
+        if self.EnoughPlayersLeft():
+            self.Betting()
+
+        if self.EnoughPlayersLeft():
+            self.Flop()
+
+        
+    def Flop(self):
+        self.ind = self.all_players_windows.first_player
+        cards = self.DealCards(3)
+        self.AnnounceNewCards(cards, "Flop")
+        
+        self.Betting()
+        if self.EnoughPlayersLeft():
+            self.Turn()
+
+        
+    def Turn(self): # also announce stuff! maybe pass on a text to print underneath the cards
+        self.ind = self.all_players_windows.first_player
+        cards = self.DealCards(1)
+        self.AnnounceNewCards(cards, "Turn")
+        
+        self.Betting()
+        if self.EnoughPlayersLeft():
+            self.River()
+
+
+    def River(self): # also announce stuff! maybe pass on a text to print underneath the cards
+        self.ind = self.all_players_windows.first_player
+        cards = self.DealCards(1)
+        self.AnnounceNewCards(cards, "River")
+        
+        self.Betting()
+        if self.EnoughPlayersLeft():
+            self.RevealCards()
+        
+
+    #------------------- BETTING STEPS ----------------------------------------
+    
+    def SmallAndBigBlinds(self):
+        for multiple in self.all_players_windows.game_options.small_and_big_blinds:
+            money_amount = multiple*self.all_players_windows.game_options.small_blind.initial_value
+            current_player_window = self.NextActivePlayer()
+            
+            while self.EnoughPlayersLeft() and (not current_player_window.player.PutMoney(money_amount)):
+                current_player_window = self.NextActivePlayer()
+                
+            self.prev_last_raised = self.ind
+            # make announcement that the money was for small and big blind.
+            self.NextInd()
+            self.Sleep(False)
+   
+            if not self.EnoughPlayersLeft():
+                break
+                  
+    
+    def Betting(self):   
+        number_of_rounds = 0
+        while number_of_rounds < self.all_players_windows.game_options.num_bet_rounds.initial_value:
+            if number_of_rounds+1 == self.all_players_windows.game_options.num_bet_rounds.initial_value:
+                self.last_round = True 
+            self.OneRoundBetting()    
+            if self.no_new_raise or (not self.EnoughPlayersLeft()):#is the second condition necessary here?
+                break
+            number_of_rounds += 1
+        
+        self.AfterBettingFixes()
+        
+        
+    def AfterBettingFixes(self):
+        self.last_round = False
+        self.first_move  = True
+        # so that next Betting starts from the correct place.    
+        self.ind                = self.all_players_windows.first_player
+        self.prev_last_raised   = self.all_players_windows.first_player
+        self.all_players_windows.table.UpdateBets()
+
+    
+    
+    def OneRoundBetting(self):
+        self.no_new_raise = True
+        while self.no_new_raise and self.EnoughPlayersLeft():
+            if self.first_move: # if this condition isn't checked, the loop stops at first move.
+                self.first_move = False
+                current_player_window = self.NextActivePlayer()
+            else:
+                current_player_window = self.NextActivePlayer(self.prev_last_raised)
+
+            if current_player_window == None:
+                return
+            self.TakeBet(current_player_window)     
+            self.NextInd()
+        
+        while (not self.no_new_raise) and self.EnoughPlayersLeft(): # changed from zero.
+            current_player_window = self.NextActivePlayer(self.all_players_windows.first_player)
+            if current_player_window == None:
+                return
+            self.TakeBet(current_player_window)
+            self.NextInd()        
+
+            
+    def TakeBet(self, current_player_window): # add an option for already all in player to stay?       
+        if current_player_window.player.money +\
+            self.all_players_windows.table.current_bets[current_player_window.player]\
+            <= self.all_players_windows.table.check_amount:
+            if current_player_window.player.participation == "all in":
+                options = ["fold", "stay"]
+            else:
+                options = ["fold", "all in"]
+        else:
+            if self.all_players_windows.table.check_amount > 0:
+                call_or_check = "call"
+            else:
+                call_or_check = "check"
+            if self.last_round:
+                options = ["fold", call_or_check]
+            else:
+                options = ["fold", call_or_check, "raise", "all in"]
+        
+        old_table_check_amount = self.all_players_windows.table.check_amount
+        AskTheQuestionHandler(current_player_window, options)
+
+        if old_table_check_amount < self.all_players_windows.table.check_amount:
+            self.no_new_raise = False
+            self.prev_last_raised = self.ind
+        
+        self.Sleep(False)
+                
+    #----------------- END OF GAME STEPS --------------------------------------
+    
+    def RevealCards(self):
+        while self.EnoughPlayersLeft():
+            if self.first_move:
+                current_player_window = self.NextActivePlayer()
+                self.first_move = False
+            else:
+                current_player_window = self.NextActivePlayer(self.prev_last_raised)
+            if current_player_window == None:
+                break
+            
+            options = ["reveal", "fold"]
+            AskTheQuestionHandler(current_player_window, options)
+            self.NextInd()
+            
+        if self.EnoughPlayersLeft():
+            self.AfterBettingFixes() 
+            self.FindWinner()
+         
+        
+    def FindWinner(self):
+        all_poker_hands = []
+        while True:
+            if self.first_move:
+                current_player_window = self.NextActivePlayer()
+                self.first_move = False
+            else:
+                current_player_window = self.NextActivePlayer(self.all_players_windows.first_player)
+            if current_player_window == None:
+                break
+            
+            current_hand_strength = PokerHandStrength(self.all_players_windows, current_player_window)
+            current_hand_strength.AnnounceBestCards()
+            all_poker_hands.append(current_hand_strength)
+            self.NextInd()
+        
+        comparing_hands = ComparePokerHands(all_poker_hands)
+        winners = comparing_hands.FindBestPokerHand()
+        self.AnnounceWinner(winners)
+        
+
+    
+    def AnnounceWinner(self, array_of_winners = None):
+        start_text =  "The winner is: "
+        names_text_arr = []
+        winning_players_windows = []        
+        
+        if array_of_winners:    
+            if len(array_of_winners) > 1:
+                start_text =  "The winners are: " 
+            
+            for poker_hand_strength in array_of_winners: # player number 2, John, with full house
+                winning_players_windows.append(poker_hand_strength.player_window)
+                text = self.SeatNumberAndName(poker_hand_strength.player_window)+" with "+\
+                            poker_hand_strength.FindBestCards()[1]
+                names_text_arr.append(text)
+                
+        else:
+            for player_window in self.all_players_windows.all_players.windows:
+                if not player_window.state.quit.val:
+                    winning_players_windows.append(player_window)
+                    names_text_arr.append(self.SeatNumberAndName(player_window))                    
+                    
+        self.all_players_windows.MakeAnnouncement(start_text , None)
+        for i in range(len(names_text_arr)):
+            self.all_players_windows.MakeAnnouncement(names_text_arr[i], None)  
+        # creat pop out message to congragulate the winners?
+        
+        self.DistributeMoney(winning_players_windows)                    
+
+                        
+    def DistributeMoney(self, winning_players_windows):
+        # each of the winners bets will return to them. 
+        max_winner_bet = 0
+        total_winner_bets = 0
+        for winner_window in winning_players_windows:
+            winner_bet_amount = self.all_players_windows.table.bets[winner_window.player]
+            total_winner_bets += winner_bet_amount
+            if max_winner_bet < winner_bet_amount: 
+                max_winner_bet = winner_bet_amount
+                
+        total_money = 0
+        for player in self.all_players_windows.table.seats:
+            if player == None or player.player_window in winning_players_windows:
+                continue
+            if self.all_players_windows.table.bets[player] > max_winner_bet:
+                total_money += max_winner_bet
+                player.money += self.all_players_windows.table.bets[player] - max_winner_bet
+            else:
+                total_money +=  self.all_players_windows.table.bets[player]
+            self.all_players_windows.table.bets[player] = 0
+        
+        if not total_winner_bets:
+            total_winner_bets = 1 # just so I won't divide by zero below.
+        for winner_window in winning_players_windows:
+            winner_bet_amount = self.all_players_windows.table.bets[winner_window.player]
+            
+            winner_window.player.money += winner_bet_amount+\
+                                        (total_money*winner_bet_amount)//total_winner_bets
+            self.all_players_windows.table.bets[winner_window.player] = 0
+        
+        self.all_players_windows.UpdateInformationTable()
+
+
+        
+    #================== HELPER FUNCTIONS ======================================
+    
+    def NextActivePlayer(self, up_until_ind = None):# if up_until_ind is not None, it could return None.
+        counter = 0
+        while counter < len(self.all_players_windows.all_players.windows):
+            if self.ind == up_until_ind:
+                return
+            current_player_window = self.all_players_windows.all_players.windows[self.ind]
+            if self.QuitOrFold(current_player_window):
+                self.NextInd()
+            else:
+                break
+
+            counter += 1
+        if counter < len(self.all_players_windows.all_players.windows):
+            return self.all_players_windows.all_players.windows[self.ind]
+
+        
+    def NextInd(self):
+        self.ind = (self.ind+1) % len(self.all_players_windows.all_players.windows)
+        
+    def QuitOrFold(self, cur_player_window):
+        return   cur_player_window.state.quit.val or \
+                (cur_player_window.player.participation == "fold")
+                
+    
+    def EnoughPlayersLeft(self):
+        num_of_players_left = 0
+        for i in range(len(self.all_players_windows.all_players.windows)):
+            current_player_window = self.all_players_windows.all_players.windows[i]
+            if not self.QuitOrFold(current_player_window):
+                num_of_players_left += 1
+        
+        if num_of_players_left < 2:
+            self.AnnounceWinner()
+            return False
+        return True
+
+    #====================== RELATED TO GRAPHIC INTERFACE ======================
+    
+    def SeatNumberAndName(self, player_window):
+        text = "Player number "+str(player_window.player.seat_number+1)+", "+\
+                player_window.player.name
+        return text
+    
+    def DealCards(self, number):        
+        self.all_players_windows.table.deck.Burn()
+        
+        cards = []
+        for i in range(number):
+            padx = self.CardPadding(i, number)            
+            card = self.all_players_windows.table.deck.Draw()  
+            cards.append(card)
+            self.all_players_windows.table.GetCard(card)
+            self.all_players_windows.DealCardOnTable(card, padx)
+        return cards
+    
+    
+    def AnnounceNewCards(self, cards, level_text):
+        announcement_text = "The "+level_text+" Is Dealt!"
+        self.all_players_windows.MakeAnnouncement(announcement_text , None)
+        card_vals = ""
+        for card in cards:
+            card_vals += card.val+ " "
+        self.all_players_windows.MakeAnnouncement(card_vals, None)
+    
+    
+    def CardPadding(self, ind, number):
+        if number == 1:
+            return (10, 10)
+        elif ind == 0:
+            return (10, 0)
+        elif ind == number-1:
+            return (0, 10)
+        else:
+            return 0
+    
+    
+    def Sleep(self, wait = True):
+        if wait:
+            time.sleep(self.all_players_windows.game_options.pausing_time.initial_value/10)
+            
+###############################################################################
+###############################################################################
+class ComparePokerHands():
+    def __init__(self, all_poker_hands):
+        self.all_poker_hands = all_poker_hands
+        self.good_hands_ranked = self.all_poker_hands[0].best_hands_ranked[ : , 1]
+        #self.FindBestPokerHand()
+        
+        
+        
+    def FindBestPokerHand(self):
+        winners = [self.all_poker_hands[0]] 
+        if len(self.all_poker_hands) == 1:
+            return winners
+        
+        for i in range(1, len(self.all_poker_hands)):
+            better_hand = self.CompareTwoHands(winners[0], self.all_poker_hands[i])    
+            if len(better_hand) > 1: 
+                winners.append(self.all_poker_hands[i])
+            elif better_hand[0] == 1:
+                winners = [self.all_poker_hands[i]]
+        return winners    
+                
+    def CompareTwoHands(self, poker_hand_strength_1, poker_hand_strength_2):
+        [best_cards_1, case_1] = poker_hand_strength_1.FindBestCards() 
+        [best_cards_2, case_2] = poker_hand_strength_2.FindBestCards()
+        case_1_ind = np.where(self.good_hands_ranked == case_1)[0][0] 
+        case_2_ind = np.where(self.good_hands_ranked == case_2)[0][0]
+        if case_1_ind < case_2_ind:
+            return [0]
+        elif case_1_ind > case_2_ind:
+            return [1]
+        else:
+            for i in range(min(len(best_cards_1), len(best_cards_2))):
+                card_1 = best_cards_1[i]
+                card_2 = best_cards_2[i]
+                if card_1.number > card_2.number:
+                    return [0]
+                elif card_1.number < card_2.number:
+                    return [1]
+         
+        return [0, 1]
+        #return [poker_hand_strength_1, poker_hand_strength_2]
+      
+#------------------------------------------------------------------------------
+        
+class PokerHandStrength():
+    def __init__(self, all_players_windows, player_window):#, cards = None):
+        self.all_players_windows = all_players_windows
+        self.player_window = player_window
+        
+        # is this np.array? should I use extend or np.append? does this affect the rest of the program? 
+        #self.cards = np.append(self.player_window.player.cards, self.all_players_windows.table.cards)
+        #self.cards.tolist() # for now, maybe fix later.
+        first_arr = self.player_window.player.cards.copy()
+        second_arr = self.all_players_windows.table.cards.copy()
+        self.cards = np.append(first_arr, second_arr).tolist()
+        #self.cards = cards
+        
+        [self.number_dict, self.suit_dict] = self.CardDict()
+        self.num_of_considered_cards = 5 # for Poker, the best 5 cards are considered 
+        
+        #[self.top_cards, self.lengths_array] = self.SomeOfAKind(self.cards)
+         
+        self.best_hands_ranked = np.array([\
+                        [self.StraightFlush              , "straight flush" ],\
+                        [self.SomeOfAKindCaseWork([4])   , "four of a kind" ],\
+                        [self.SomeOfAKindCaseWork([3, 2]), "full house"     ],\
+                        [self.Flush                      , "flush"          ],\
+                        [self.Straight                   , "straight"       ],\
+                        [self.SomeOfAKindCaseWork([3])   , "three of a kind"],\
+                        [self.SomeOfAKindCaseWork([2, 2]), "two pairs"      ],\
+                        [self.SomeOfAKindCaseWork([2])   , "a pair"         ],\
+                        [self.SomeOfAKindCaseWork([1])   , "high card"      ]])
+        
+        
+        
+    def AnnounceBestCards(self):
+        case_text = "The player "+self.player_window.player.name+" has "+self.FindBestCards()[1]
+        text = ""
+        for card in self.FindBestCards()[0]:
+            text += card.val + " "  
+        self.all_players_windows.MakeAnnouncement(case_text, None)
+        self.all_players_windows.MakeAnnouncement(text, self.player_window)
+        
+        
+    def FindBestCards(self):
+        for pair in self.best_hands_ranked:
+            if pair[0](self.cards)[0]:
+                return [pair[0](self.cards)[0], pair[1]]
+        
+        pair = self.best_hands_ranked[-1]
+        return [pair[0](self.cards)[0], pair[1]]
+                
+    
+    # given cards (of class Card), returns dictionaries number_dict, suit_dict
+    # which are cards ordered by their number/suit respectively.   
+    def CardDict(self, cards = None):
+        if cards == None:
+            cards = self.cards
+        
+        number_dict = {}
+        suit_dict = {}
+        for card in cards:
+            if card.number in number_dict:
+                number_dict[card.number].append(card)
+            else:
+                number_dict[card.number] = [card]
+            if card.suit in suit_dict:
+                suit_dict[card.suit].append(card)
+            else:
+                suit_dict[card.suit] = [card]
+        return [number_dict, suit_dict]
+    
+    # returns array other_cards that contains Card if it is in cards, but not in current_cards.
+    def OtherCards(self, cards, current_cards = None):
+        other_cards = []
+        if cards:
+            for card in cards:
+                if current_cards == None or card not in current_cards:
+                    other_cards.append(card)
+        return other_cards
+    
+    # returns an array of card.number, sorted from largest to smallest.
+    def SortCardsNumber(self, cards):
+        nums = []
+        if cards:
+            for card in cards:
+                nums.append(card.number)
+        if len(nums) > 0:
+            nums.sort(reverse = True)
+        return nums
+    
+    
+    def SortCardsSuit(self, cards):
+        if cards:
+            pass
+            #Standards.suits
+    
+    
+    # returns False if nums2 is bigger, returns True if nums1 is bigger, returns None if equal.
+    def FirstLexLarger(self, cards_1, cards_2):
+        nums_1 = self.SortCardsNumber(cards_1)
+        nums_2 = self.SortCardsNumber(cards_2)
+        
+        i = 0
+        while i < min(len(nums_1), len(nums_2)):
+            if nums_1[i] < nums_2[i]:
+                return False
+            elif nums_1[i] > nums_2[i]:
+                return True
+            i += 1
+        
+        if len(nums_1) < len(nums_2):
+            return False
+        elif len(nums_1) > len(nums_2):
+            return True
+        else: # in this case they are equal
+            return 
+        
+    # among the numbers with most repeats returns the largest one
+        # num_of_cards_returned makes sure that repetition more than that number is not important: 
+            # e.g. if num_of_cards_returned == 2, then 2 kings is returned instead of 4 queens.
+        # min_number_of_cards makes sure that fewer than that number is not considered.
+            # e.g. if min_number_of_cards = 2, then pairs are not considered, and we look for triples etc.
+    def BestOfAKind(self, cards, num_of_cards_returned = 5, min_number_of_cards = 0):
+        num_of_cards_returned = min(self.num_of_considered_cards, num_of_cards_returned)
+        current_number_dict = self.CardDict(cards)[0]
+        
+        most = min_number_of_cards
+        current_cards = None
+        for number in range(14, 1, -1):
+            if number not in current_number_dict:
+                continue
+            repeat = min(len(current_number_dict[number]), num_of_cards_returned)
+            if repeat > most:
+                most = repeat
+                current_cards = current_number_dict[number][ :num_of_cards_returned]
+                
+        return [current_cards, self.OtherCards(cards, current_cards)]
+
+    # Finds 4 of a kind, fullhouse, triple, 2 piars and pair. Does NOT consider flush or straight.        
+    # returns the cards_found and lengths_array, both arrays, first has type Card, second has type int.
+        # cards_found are the best self.num_of_considered_cards, considering only k-of a kind for all k's.
+        # lengths_array is the length of each k-of a kind, sorted from the largest to the smallest,
+            # sum(lengths_array) == self.num_of_considered_cards
+    def SomeOfAKind(self, cards):
+        num_of_considered_cards = self.num_of_considered_cards
+        if len(cards) < self.num_of_considered_cards:
+            num_of_considered_cards = len(cards)
+        
+        current_cards = cards
+        cards_found = []
+        lengths_array = []
+        counter = 0 # not very useful
+        while len(cards_found) < num_of_considered_cards:
+            # we don't want to have more than a total of num_of_considered_cards cards, so we must 
+            [of_a_kind, other_cards] = self.BestOfAKind(current_cards, \
+                                                        num_of_considered_cards-len(cards_found))
+            cards_found.extend(of_a_kind)
+            lengths_array.append(len(of_a_kind))
+            current_cards = other_cards
+            counter += 1 # not very useful
+            if counter > self.num_of_considered_cards: # just to make sure nothing bad happens.
+                break
+            
+        return [cards_found, lengths_array]
+
+
+    def SomeOfAKindCaseWork(self, array):
+        def case_work(array, cards = None):
+            if cards == None:
+                cards = self.cards
+            start_the_same = True
+            lengths_array = self.SomeOfAKind(cards)[1]
+            for i in range(len(array)):
+                if i >= len(lengths_array) or array[i] != lengths_array[i]:
+                    start_the_same = False    
+                    break
+
+            if start_the_same:
+                current_cards = self.SomeOfAKind(cards)[0]
+                return [current_cards, self.OtherCards(cards, current_cards)]
+            return [None, cards]
+            
+        return lambda cards: case_work(array, cards)         
+    
+        
+        
+    # if there is a straight containing at least self.num_of_considered_cards, returns the highest one.
+        # returns either None, or exactly self.num_of_considered_cards number of cards.        
+    def Straight(self, cards):
+        current_number_dict = self.CardDict(cards)[0]
+        
+        for number in range(14, 1+self.num_of_considered_cards, -1):
+            straight_found = True
+            current_cards = []
+            for i in range(self.num_of_considered_cards):
+                if number-i in current_number_dict:
+                    new_card = current_number_dict[number-i][0] # should I do S, D, C, H?
+                    current_cards.append(new_card) 
+                else:
+                    straight_found = False
+                    break
+            if straight_found:
+                return [current_cards, self.OtherCards(cards, current_cards)]
+
+        # maybe combine both of these into a function so I don't repeat most of the code?
+        if 14 in current_number_dict:
+            current_cards = [] # should I do S, D, C, H?
+            small_straight_with_ace = True
+            for i in range(self.num_of_considered_cards-1):
+                if i+2 in current_number_dict:
+                    new_card =  current_number_dict[i+2][0]# should I do S, D, C, H?
+                    current_cards.append(new_card)
+                else:
+                    small_straight_with_ace = False
+                    break
+            if small_straight_with_ace:
+                current_cards.append(current_number_dict[14][0])
+                return [current_cards, self.OtherCards(cards, current_cards)]
+             
+        return [None, cards]        
+  
+     # if there are at least self.num_of_considered_cards of the same suit, returns the highest one. 
+         # returns None or may return more than self.num_of_considered_cards number of cards.
+    def Flush(self, cards):
+        current_suit_dict = self.CardDict(cards)[1]
+        
+        prev = None
+        for suit in Standards().suits:
+            if suit not in current_suit_dict:
+                continue
+            
+            current_cards = current_suit_dict[suit]
+            if len(current_cards) < self.num_of_considered_cards:
+                continue
+                
+            if self.FirstLexLarger(current_cards, prev):
+                prev = current_cards
+        
+        return [prev, self.OtherCards(cards, prev)]
+            
+    # if there is a straightflush containing at least self.num_of_considered_cards, returns the highest one.
+        # returns either None, or exactly self.num_of_considered_cards number of cards.
+    def StraightFlush(self, cards):
+        current_cards = cards
+        while self.Flush(current_cards)[0]:
+            [current_flush, other_cards] = self.Flush(current_cards)
+            if self.Straight(current_flush)[0]:
+                straight_flush = self.Straight(current_flush)[0]
+                return [straight_flush, self.OtherCards(cards, straight_flush)]
+            else:
+                current_cards = other_cards
+        return [None, cards]                    
+###############################################################################
+            
+###############################################################################    
+
+
+
+GameGraphics()      
+  
+    
+   
